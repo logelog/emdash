@@ -84,6 +84,7 @@ export function Shell({ children, manifest }: ShellProps) {
 	return (
 		<Sidebar.Provider
 			defaultOpen
+			peekable
 			side={sidebarSide}
 			style={
 				{

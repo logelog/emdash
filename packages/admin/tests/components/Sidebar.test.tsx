@@ -23,13 +23,16 @@
  * the contract, the filter pins the gate.
  */
 
-import { PuzzlePiece, Gear, Trophy, ClockCounterClockwise } from "@phosphor-icons/react";
+import { PuzzlePiece, Gear, Trophy, ClockCounterClockwise, FileText } from "@phosphor-icons/react";
 import * as React from "react";
 import { describe, it, expect } from "vitest";
 
 import {
 	BYLINE_SCHEMA_NAV_ITEM,
+	buildCollectionNavItems,
 	filterNavItemsByRole,
+	findStandaloneTaxonomies,
+	isNavItemActive,
 	resolveNavIcon,
 	toPhosphorIconName,
 } from "../../src/components/Sidebar";
@@ -94,6 +97,77 @@ describe("filterNavItemsByRole", () => {
 		// must strip every gated entry at role=0.
 		const visible = filterNavItemsByRole(items, 0).map((i) => i.to);
 		expect(visible).toEqual(["/"]);
+	});
+
+	it("filters nested items without hiding an otherwise visible parent", () => {
+		const nestedItems = [
+			{
+				to: "/content/posts",
+				children: [
+					{ to: "/content/posts", minRole: undefined },
+					{ to: "/taxonomies/category", minRole: ROLE_EDITOR },
+				],
+			},
+		];
+		const [parent] = filterNavItemsByRole(nestedItems, ROLE_AUTHOR);
+		expect(parent.children?.map((item) => item.to)).toEqual(["/content/posts"]);
+	});
+});
+
+describe("collection navigation", () => {
+	const taxonomies = [
+		{ name: "category", label: "Categories", hierarchical: true, collections: ["posts"] },
+		{ name: "tag", label: "Tags", hierarchical: false, collections: ["posts"] },
+		{ name: "topic", label: "Topics", hierarchical: true, collections: [] },
+	];
+	const items = buildCollectionNavItems(
+		{
+			pages: { label: "Pages", labelSingular: "Page" },
+			posts: { label: "Posts", labelSingular: "Post" },
+		},
+		taxonomies,
+		{ all: (label) => `All ${label}`, addNew: (label) => `Add New ${label}` },
+	);
+
+	it("keeps collections without taxonomies as direct links", () => {
+		expect(items.find((item) => item.label === "Pages")?.children).toBeUndefined();
+	});
+
+	it("nests collection actions and assigned taxonomies in a stable order", () => {
+		expect(
+			items.find((item) => item.label === "Posts")?.children?.map((item) => item.label),
+		).toEqual(["All Posts", "Add New Post", "Categories", "Tags"]);
+	});
+
+	it("leaves unassigned taxonomies in the standalone Manage group", () => {
+		expect(
+			findStandaloneTaxonomies(taxonomies, ["pages", "posts"]).map((item) => item.name),
+		).toEqual(["topic"]);
+	});
+
+	it("distinguishes exact submenu routes from their active parent", () => {
+		const posts = items.find((item) => item.label === "Posts");
+		const allPosts = posts?.children?.find((item) => item.label === "All Posts");
+		const addNew = posts?.children?.find((item) => item.label === "Add New Post");
+		expect(posts && isNavItemActive(posts, "/content/posts/entry-1")).toBe(true);
+		expect(allPosts && isNavItemActive(allPosts, "/content/posts/entry-1")).toBe(false);
+		expect(addNew && isNavItemActive(addNew, "/content/posts/new/")).toBe(true);
+	});
+
+	it("matches nested taxonomy routes independently of the collection path", () => {
+		const category = items
+			.find((item) => item.label === "Posts")
+			?.children?.find((item) => item.label === "Categories");
+		expect(category && isNavItemActive(category, "/taxonomies/category")).toBe(true);
+	});
+
+	it("normalizes trailing slashes for exact routes", () => {
+		expect(
+			isNavItemActive(
+				{ to: "/content/posts", label: "All Posts", icon: FileText, match: "exact" },
+				"/content/posts/",
+			),
+		).toBe(true);
 	});
 });
 

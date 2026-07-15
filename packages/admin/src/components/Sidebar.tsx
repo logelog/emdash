@@ -48,6 +48,7 @@ export { KumoSidebar as Sidebar, useSidebar };
 // Role levels (matching @emdash-cms/auth)
 const ROLE_ADMIN = 50;
 const ROLE_EDITOR = 40;
+const TRAILING_SLASH_PATTERN = /\/+$/;
 
 /**
  * Static invariants for nav entries that have AC-level visibility
@@ -73,16 +74,25 @@ export const BYLINE_SCHEMA_NAV_ITEM = {
  * item passes when it has no `minRole` (public) or the user is at
  * least the required level.
  */
-export function filterNavItemsByRole<T extends { minRole?: number }>(
+export function filterNavItemsByRole<T extends { minRole?: number; children?: T[] }>(
 	items: T[],
 	userRole: number,
 ): T[] {
-	return items.filter((item) => !item.minRole || userRole >= item.minRole);
+	return items.flatMap((item) => {
+		if (item.minRole && userRole < item.minRole) return [];
+		if (!item.children) return [item];
+		return [
+			{
+				...item,
+				children: filterNavItemsByRole(item.children, userRole),
+			},
+		];
+	});
 }
 
 export interface SidebarNavProps {
 	manifest: {
-		collections: Record<string, { label: string }>;
+		collections: Record<string, { label: string; labelSingular?: string }>;
 		plugins: Record<
 			string,
 			{
@@ -101,6 +111,8 @@ export interface SidebarNavProps {
 		taxonomies: Array<{
 			name: string;
 			label: string;
+			hierarchical?: boolean;
+			collections?: string[];
 		}>;
 		version?: string;
 		commit?: string;
@@ -116,15 +128,80 @@ export interface SidebarNavProps {
 	};
 }
 
-interface NavItem {
+export interface NavItem {
 	to: string;
 	label: string;
 	icon: React.ElementType;
 	params?: Record<string, string>;
+	match?: "exact" | "prefix";
+	children?: NavItem[];
 	/** Minimum role level required to see this item */
 	minRole?: number;
 	/** Optional badge count (e.g., pending comments) */
 	badge?: number;
+}
+
+export interface SidebarTaxonomy {
+	name: string;
+	label: string;
+	hierarchical?: boolean;
+	collections?: string[];
+}
+
+export function buildCollectionNavItems(
+	collections: Record<string, { label: string; labelSingular?: string }>,
+	taxonomies: SidebarTaxonomy[],
+	labels: {
+		all: (collectionLabel: string) => string;
+		addNew: (collectionLabel: string) => string;
+	},
+): NavItem[] {
+	return Object.entries(collections).map(([name, config]) => {
+		const params = { collection: name };
+		const relatedTaxonomies = taxonomies.filter((taxonomy) => taxonomy.collections?.includes(name));
+		const item: NavItem = {
+			to: "/content/$collection",
+			label: config.label,
+			icon: FileText,
+			params,
+		};
+		if (relatedTaxonomies.length === 0) return item;
+
+		item.children = [
+			{
+				to: "/content/$collection",
+				label: labels.all(config.label),
+				icon: FileText,
+				params,
+				match: "exact",
+			},
+			{
+				to: "/content/$collection/new",
+				label: labels.addNew(config.labelSingular ?? config.label),
+				icon: FileText,
+				params,
+				match: "exact",
+			},
+			...relatedTaxonomies.map((taxonomy) => ({
+				to: "/taxonomies/$taxonomy",
+				label: taxonomy.label,
+				icon: taxonomy.hierarchical ? Folder : Tag,
+				params: { taxonomy: taxonomy.name },
+				minRole: ROLE_EDITOR,
+			})),
+		];
+		return item;
+	});
+}
+
+export function findStandaloneTaxonomies(
+	taxonomies: SidebarTaxonomy[],
+	collectionNames: readonly string[],
+): SidebarTaxonomy[] {
+	const knownCollections = new Set(collectionNames);
+	return taxonomies.filter(
+		(taxonomy) => !taxonomy.collections?.some((collection) => knownCollections.has(collection)),
+	);
 }
 
 /**
@@ -252,11 +329,76 @@ function NavMenuLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
 			tooltip={state === "collapsed" ? item.label : undefined}
 			icon={IconComponent}
 		>
-			{item.label}
+			<span className="min-w-0 flex-1 truncate">{item.label}</span>
 			{item.badge != null && item.badge > 0 && (
 				<KumoSidebar.MenuBadge>{item.badge}</KumoSidebar.MenuBadge>
 			)}
 		</KumoSidebar.MenuButton>
+	);
+}
+
+function NavSubMenuLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
+	return (
+		<KumoSidebar.MenuSubButton href={resolveItemPath(item)} active={isActive}>
+			<span className="min-w-0 flex-1 truncate">{item.label}</span>
+			{item.badge != null && item.badge > 0 && (
+				<KumoSidebar.MenuBadge>{item.badge}</KumoSidebar.MenuBadge>
+			)}
+		</KumoSidebar.MenuSubButton>
+	);
+}
+
+function CollapsibleNavMenu({ item, currentPath }: { item: NavItem; currentPath: string }) {
+	const { state } = useSidebar();
+	const children = item.children ?? [];
+	const hasActiveChild = children.some((child) => isNavItemActive(child, currentPath));
+	const isSectionActive = isNavItemActive(item, currentPath) || hasActiveChild;
+	const highlightParent = isNavItemActive(item, currentPath) && !hasActiveChild;
+	const [open, setOpen] = React.useState(isSectionActive);
+	const previousPath = React.useRef(currentPath);
+	const Icon = item.icon;
+
+	React.useEffect(() => {
+		if (isSectionActive) {
+			setOpen(true);
+		} else if (previousPath.current !== currentPath) {
+			setOpen(false);
+		}
+		previousPath.current = currentPath;
+	}, [currentPath, isSectionActive]);
+
+	function IconComponent({ className }: { className?: string }) {
+		return <NavIcon icon={Icon} className={className} />;
+	}
+
+	if (state === "collapsed") {
+		return <NavMenuLink item={item} isActive={isSectionActive} />;
+	}
+
+	return (
+		<KumoSidebar.MenuItem>
+			<KumoSidebar.Collapsible open={open} onOpenChange={setOpen}>
+				<KumoSidebar.CollapsibleTrigger
+					render={
+						<KumoSidebar.MenuButton active={highlightParent} icon={IconComponent}>
+							<span className="min-w-0 flex-1 truncate">{item.label}</span>
+							<KumoSidebar.MenuChevron />
+						</KumoSidebar.MenuButton>
+					}
+				/>
+				<KumoSidebar.CollapsibleContent>
+					<KumoSidebar.MenuSub>
+						{children.map((child) => (
+							<NavSubMenuLink
+								key={resolveItemPath(child)}
+								item={child}
+								isActive={isNavItemActive(child, currentPath)}
+							/>
+						))}
+					</KumoSidebar.MenuSub>
+				</KumoSidebar.CollapsibleContent>
+			</KumoSidebar.Collapsible>
+		</KumoSidebar.MenuItem>
 	);
 }
 
@@ -280,10 +422,15 @@ function resolveItemPath(item: NavItem): string {
 }
 
 /** Checks if a nav item is active based on the current router path. */
-function isItemActive(itemPath: string, currentPath: string): boolean {
-	return itemPath === "/"
-		? currentPath === "/"
-		: currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
+function normalizeNavPath(path: string): string {
+	return path.length > 1 ? path.replace(TRAILING_SLASH_PATTERN, "") : path;
+}
+
+export function isNavItemActive(item: NavItem, currentPath: string): boolean {
+	const itemPath = normalizeNavPath(resolveItemPath(item));
+	const activePath = normalizeNavPath(currentPath);
+	if (item.match === "exact" || itemPath === "/") return activePath === itemPath;
+	return activePath === itemPath || activePath.startsWith(`${itemPath}/`);
 }
 
 /**
@@ -309,16 +456,18 @@ export function SidebarNav({ manifest }: SidebarNavProps) {
 
 	// --- Build nav item groups ---
 
-	const contentItems: NavItem[] = [{ to: "/", label: t`Dashboard`, icon: SquaresFour }];
-	for (const [name, config] of Object.entries(manifest.collections)) {
-		contentItems.push({
-			to: "/content/$collection",
-			label: config.label,
-			icon: FileText,
-			params: { collection: name },
-		});
-	}
+	const contentItems: NavItem[] = [
+		{ to: "/", label: t`Dashboard`, icon: SquaresFour },
+		...buildCollectionNavItems(manifest.collections, manifest.taxonomies, {
+			all: (label) => t`All ${label}`,
+			addNew: (label) => t`Add New ${label}`,
+		}),
+	];
 	contentItems.push({ to: "/media", label: t`Media`, icon: Image });
+	const standaloneTaxonomies = findStandaloneTaxonomies(
+		manifest.taxonomies,
+		Object.keys(manifest.collections),
+	);
 
 	const manageItems: NavItem[] = [
 		{
@@ -332,10 +481,10 @@ export function SidebarNav({ manifest }: SidebarNavProps) {
 		{ to: "/redirects", label: t`Redirects`, icon: ArrowsLeftRight, minRole: ROLE_ADMIN },
 		{ to: "/widgets", label: t`Widgets`, icon: GridFour, minRole: ROLE_EDITOR },
 		{ to: "/sections", label: t`Sections`, icon: Stack, minRole: ROLE_EDITOR },
-		...manifest.taxonomies.map((tax) => ({
+		...standaloneTaxonomies.map((tax) => ({
 			to: "/taxonomies/$taxonomy" as const,
 			label: tax.label,
-			icon: FileText,
+			icon: tax.hierarchical ? Folder : Tag,
 			params: { taxonomy: tax.name },
 			minRole: ROLE_EDITOR,
 		})),
@@ -409,9 +558,11 @@ export function SidebarNav({ manifest }: SidebarNavProps) {
 
 	function renderNavItems(items: NavItem[]) {
 		return items.map((item, index) => {
-			const itemPath = resolveItemPath(item);
-			const active = isItemActive(itemPath, currentPath);
-			return <NavMenuLink key={`${item.to}-${index}`} item={item} isActive={active} />;
+			const key = `${resolveItemPath(item)}-${index}`;
+			if (item.children?.length) {
+				return <CollapsibleNavMenu key={key} item={item} currentPath={currentPath} />;
+			}
+			return <NavMenuLink key={key} item={item} isActive={isNavItemActive(item, currentPath)} />;
 		});
 	}
 
@@ -440,7 +591,10 @@ export function SidebarNav({ manifest }: SidebarNavProps) {
 					<KumoSidebar.Menu>
 						<NavMenuLink
 							item={{ to: "/", label: t`Dashboard`, icon: SquaresFour }}
-							isActive={isItemActive("/", currentPath)}
+							isActive={isNavItemActive(
+								{ to: "/", label: t`Dashboard`, icon: SquaresFour },
+								currentPath,
+							)}
 						/>
 					</KumoSidebar.Menu>
 				</KumoSidebar.Group>
