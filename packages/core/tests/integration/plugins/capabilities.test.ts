@@ -158,6 +158,7 @@ describe("Capability Enforcement Integration (v2)", () => {
 
 				expect(post).not.toBeNull();
 				expect(post!.id).toBe("post-1");
+				expect(post!.translationGroup).toBe("post-1");
 				expect(post!.data.title).toBe("Hello World");
 			});
 
@@ -166,6 +167,10 @@ describe("Capability Enforcement Integration (v2)", () => {
 				const result = await access.list("posts");
 
 				expect(result.items).toHaveLength(2);
+				expect(result.items.map((item) => item.translationGroup).toSorted()).toEqual([
+					"post-1",
+					"post-2",
+				]);
 				expect(result.hasMore).toBe(false);
 			});
 
@@ -417,6 +422,7 @@ describe("Capability Enforcement Integration (v2)", () => {
 				});
 
 				expect(created.id).toBeDefined();
+				expect(created.translationGroup).toBe(created.id);
 				expect(created.data.title).toBe("New Post");
 
 				// Verify it was created

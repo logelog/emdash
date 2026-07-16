@@ -204,6 +204,8 @@ export interface ContentItem {
 	slug: string | null;
 	status: string;
 	locale: string | null;
+	/** Locale-agnostic group shared by translations of the same entry. */
+	translationGroup: string | null;
 	data: Record<string, unknown>;
 	/**
 	 * SEO metadata, populated when the collection has SEO enabled
