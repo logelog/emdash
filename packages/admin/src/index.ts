@@ -13,6 +13,14 @@ export * from "./lib/api";
 // Utilities
 export { cn } from "./lib/utils";
 
+export {
+	ContentEditorSeoSlotBoundary,
+	resolveContentEditorSeoSlot,
+	type ContentEditorSeoSlotContext,
+	type ContentEditorSeoSlotExtension,
+	type ResolvedContentEditorSeoSlot,
+} from "./lib/content-editor-seo-slot";
+
 // Plugin admin context (for accessing plugin components)
 export {
 	PluginAdminProvider,

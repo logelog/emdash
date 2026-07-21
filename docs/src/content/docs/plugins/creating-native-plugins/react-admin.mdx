@@ -224,9 +224,56 @@ export function SEOWidget() {
 
 Widgets wrap automatically based on screen width.
 
+## Content editor SEO slot
+
+A trusted React plugin can replace the body of EmDash's existing SEO section for saved entries. EmDash keeps the section heading, placement, and capability checks; the native SEO fields automatically return when the plugin is disabled, does not support the current collection, exports an invalid slot, or fails while rendering.
+
+Export `contentEditorSlots` from the plugin admin entry:
+
+```tsx title="src/admin.tsx"
+import type { ContentEditorSeoSlotContext } from "@emdash-cms/admin";
+
+function SeoEditor({ entry, seo, onChange }: ContentEditorSeoSlotContext) {
+	return (
+		<label>
+			SEO title for {entry.slug}
+			<input
+				value={seo?.title ?? ""}
+				onChange={(event) => onChange({ ...seo, title: event.currentTarget.value })}
+			/>
+		</label>
+	);
+}
+
+export const contentEditorSlots = {
+	seo: {
+		component: SeoEditor,
+		collections: ["posts", "pages"],
+	},
+};
+```
+
+The component receives the saved `entry`, its `collection`, resolved `locale`, current `seo` values, and the host `onChange` callback. `collections` may be an array or a predicate and can be omitted to support every SEO-enabled collection.
+
+```ts
+export const contentEditorSlots = {
+	seo: {
+		component: SeoEditor,
+		collections: (collection: string) => collection.startsWith("article"),
+		order: 10,
+	},
+};
+```
+
+Only one plugin owns the SEO body for a collection. If several enabled plugins apply, the lowest `order` wins; ties are resolved by plugin ID and logged as a warning. Keep the component focused on entry-level SEO editing. Site-wide SEO settings should remain on a plugin admin page.
+
+<Aside type="note">
+	This extension point is available only to trusted React plugins. Sandboxed plugins cannot execute React components inside the host admin.
+</Aside>
+
 ## Export structure
 
-The admin entry point exports two objects:
+The admin entry point exports the objects used by the features it implements:
 
 ```typescript title="src/admin.tsx"
 import { SettingsPage } from "./components/SettingsPage";

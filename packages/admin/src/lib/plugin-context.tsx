@@ -9,11 +9,16 @@
 import * as React from "react";
 import { createContext, useContext } from "react";
 
+import type { ContentEditorSeoSlotExtension } from "./content-editor-seo-slot";
+
 /** Shape of a plugin's admin exports */
 export interface PluginAdminModule {
 	widgets?: Record<string, React.ComponentType>;
 	pages?: Record<string, React.ComponentType>;
 	fields?: Record<string, React.ComponentType>;
+	contentEditorSlots?: {
+		seo?: ContentEditorSeoSlotExtension;
+	};
 }
 
 /** All plugin admin modules keyed by plugin ID */

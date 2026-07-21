@@ -17,6 +17,7 @@ import type { Editor } from "@tiptap/react";
 import * as React from "react";
 
 import type {
+	AdminManifest,
 	BylineCreditInput,
 	BylineSummary,
 	ContentItem,
@@ -25,7 +26,12 @@ import type {
 	UserListItem,
 } from "../lib/api";
 import { fetchBylines } from "../lib/api";
+import {
+	ContentEditorSeoSlotBoundary,
+	resolveContentEditorSeoSlot,
+} from "../lib/content-editor-seo-slot";
 import { useDebouncedValue } from "../lib/hooks.js";
+import { usePluginAdmins } from "../lib/plugin-context";
 import { slugify } from "../lib/utils";
 import type { CurrentUserInfo } from "./ContentEditor.js";
 import { DocumentOutline } from "./editor/DocumentOutline";
@@ -284,6 +290,7 @@ export interface ContentSettingsPanelProps {
 	collection: string;
 	item?: ContentItem | null;
 	isNew?: boolean;
+	manifest?: AdminManifest | null;
 	/** Locale this entry is bound to (URL `?locale=` for new entries). */
 	entryLocale?: string | null;
 	slug: string;
@@ -338,6 +345,7 @@ export const ContentSettingsPanel = React.memo(function ContentSettingsPanel({
 	collection,
 	item,
 	isNew,
+	manifest,
 	entryLocale,
 	slug,
 	onSlugChange,
@@ -375,6 +383,14 @@ export const ContentSettingsPanel = React.memo(function ContentSettingsPanel({
 }: ContentSettingsPanelProps) {
 	const { t } = useLingui();
 	const navigate = useNavigate();
+	const pluginAdmins = usePluginAdmins();
+	const resolvedSeoSlot = React.useMemo(
+		() =>
+			!isNew && item
+				? resolveContentEditorSeoSlot(pluginAdmins, collection, manifest?.plugins)
+				: undefined,
+		[collection, isNew, item, manifest?.plugins, pluginAdmins],
+	);
 
 	const [scheduleDate, setScheduleDate] = React.useState<string>("");
 	const [showScheduler, setShowScheduler] = React.useState(false);
@@ -415,6 +431,38 @@ export const ContentSettingsPanel = React.memo(function ContentSettingsPanel({
 				/>
 			</div>
 		) : null;
+	}
+
+	let seoEditorBody: React.ReactNode = null;
+	if (hasSeo && !isNew && onSeoChange) {
+		const nativeSeoPanel = (
+			<SeoPanel
+				contentKey={item?.id ?? `new:${collection}`}
+				seo={item?.seo}
+				onChange={onSeoChange}
+			/>
+		);
+
+		if (resolvedSeoSlot && item) {
+			const PluginSeoEditor = resolvedSeoSlot.extension.component;
+			seoEditorBody = (
+				<ContentEditorSeoSlotBoundary
+					key={`${resolvedSeoSlot.pluginId}:${item.id}`}
+					pluginId={resolvedSeoSlot.pluginId}
+					fallback={nativeSeoPanel}
+				>
+					<PluginSeoEditor
+						collection={collection}
+						entry={item}
+						locale={item.locale ?? entryLocale ?? undefined}
+						seo={item.seo}
+						onChange={onSeoChange}
+					/>
+				</ContentEditorSeoSlotBoundary>
+			);
+		} else {
+			seoEditorBody = nativeSeoPanel;
+		}
 	}
 
 	return (
@@ -597,16 +645,12 @@ export const ContentSettingsPanel = React.memo(function ContentSettingsPanel({
 				/>
 			)}
 
-			{hasSeo && !isNew && onSeoChange && (
-				<div className="p-4 border-t">
+			{seoEditorBody && (
+				<div className="border-t p-4">
 					<Text bold as="h3" DANGEROUS_className="mb-4">
 						{t`SEO`}
 					</Text>
-					<SeoPanel
-						contentKey={item?.id ?? `new:${collection}`}
-						seo={item?.seo}
-						onChange={onSeoChange}
-					/>
+					{seoEditorBody}
 				</div>
 			)}
 

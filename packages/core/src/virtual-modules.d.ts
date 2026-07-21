@@ -189,6 +189,7 @@ declare module "virtual:emdash/admin-registry" {
 	 *   - pages: Record<pageId, ComponentType>
 	 *   - widgets: Record<widgetId, ComponentType>
 	 *   - fields: Record<widgetName, ComponentType> (field widget renderers)
+	 *   - contentEditorSlots: Trusted content editor body replacements
 	 */
 	export const pluginAdmins: Record<
 		string,
@@ -196,6 +197,7 @@ declare module "virtual:emdash/admin-registry" {
 			pages?: Record<string, unknown>;
 			widgets?: Record<string, unknown>;
 			fields?: Record<string, unknown>;
+			contentEditorSlots?: Record<string, unknown>;
 		}
 	>;
 }

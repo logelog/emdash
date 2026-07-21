@@ -10,7 +10,9 @@ import {
 	type SettingsActionBarProps,
 } from "../../src/components/ContentSettingsPanel";
 import type { BlockSidebarPanel } from "../../src/components/PortableTextEditor";
-import type { ContentItem } from "../../src/lib/api";
+import type { AdminManifest, ContentItem } from "../../src/lib/api";
+import type { ContentEditorSeoSlotContext } from "../../src/lib/content-editor-seo-slot";
+import { PluginAdminProvider, type PluginAdmins } from "../../src/lib/plugin-context";
 import { render } from "../utils/render.tsx";
 
 // Mock child components with their own data fetching so the panel tests
@@ -76,6 +78,31 @@ const USERS = [
 	{ id: "u1", name: "Editor One", email: "editor@example.com", role: 40 },
 ] as ContentSettingsPanelProps["users"];
 
+const TEST_MANIFEST: AdminManifest = {
+	version: "0.30.0",
+	hash: "test",
+	collections: {},
+	plugins: { "seo-plugin": { enabled: true } },
+};
+
+function PluginSeoEditor({ entry, onChange }: ContentEditorSeoSlotContext) {
+	return (
+		<button
+			type="button"
+			data-testid="plugin-seo-editor"
+			onClick={() => onChange({ title: "Updated" })}
+		>
+			Plugin SEO for {entry.slug}
+		</button>
+	);
+}
+
+function pluginWrapper(pluginAdmins: PluginAdmins) {
+	return function PluginWrapper({ children }: React.PropsWithChildren) {
+		return <PluginAdminProvider pluginAdmins={pluginAdmins}>{children}</PluginAdminProvider>;
+	};
+}
+
 function makePanelProps(
 	overrides: Partial<ContentSettingsPanelProps> = {},
 ): ContentSettingsPanelProps {
@@ -130,6 +157,58 @@ describe("ContentSettingsPanel", () => {
 		await expect.element(screen.getByTestId("doc-outline")).toBeInTheDocument();
 		await expect.element(screen.getByTestId("revision-history")).toBeInTheDocument();
 		await expect.element(screen.getByRole("button", { name: "Move to Trash" })).toBeInTheDocument();
+	});
+
+	it("lets an applicable trusted plugin replace only the SEO section body", async () => {
+		const onSeoChange = vi.fn();
+		const pluginAdmins: PluginAdmins = {
+			"seo-plugin": {
+				contentEditorSlots: { seo: { component: PluginSeoEditor, collections: ["posts"] } },
+			},
+		};
+		const screen = await render(
+			<ContentSettingsPanel {...makePanelProps({ manifest: TEST_MANIFEST, onSeoChange })} />,
+			{ wrapper: pluginWrapper(pluginAdmins) },
+		);
+
+		await expect.element(screen.getByRole("heading", { name: "SEO" })).toBeInTheDocument();
+		await expect.element(screen.getByTestId("plugin-seo-editor")).toBeInTheDocument();
+		expect(screen.container.querySelector('[data-testid="seo-panel"]')).toBeNull();
+		await screen.getByTestId("plugin-seo-editor").click();
+		expect(onSeoChange).toHaveBeenCalledWith({ title: "Updated" });
+	});
+
+	it("falls back to native SEO when the plugin is disabled", async () => {
+		const pluginAdmins: PluginAdmins = {
+			"seo-plugin": { contentEditorSlots: { seo: { component: PluginSeoEditor } } },
+		};
+		const manifest: AdminManifest = {
+			...TEST_MANIFEST,
+			plugins: { "seo-plugin": { enabled: false } },
+		};
+		const screen = await render(<ContentSettingsPanel {...makePanelProps({ manifest })} />, {
+			wrapper: pluginWrapper(pluginAdmins),
+		});
+
+		await expect.element(screen.getByTestId("seo-panel")).toBeInTheDocument();
+		expect(screen.container.querySelector('[data-testid="plugin-seo-editor"]')).toBeNull();
+	});
+
+	it("falls back to native SEO when the plugin body throws", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		function BrokenSeoEditor(): React.ReactNode {
+			throw new Error("render failed");
+		}
+		const pluginAdmins: PluginAdmins = {
+			"seo-plugin": { contentEditorSlots: { seo: { component: BrokenSeoEditor } } },
+		};
+		const screen = await render(
+			<ContentSettingsPanel {...makePanelProps({ manifest: TEST_MANIFEST })} />,
+			{ wrapper: pluginWrapper(pluginAdmins) },
+		);
+
+		await expect.element(screen.getByTestId("seo-panel")).toBeInTheDocument();
+		expect(errorSpy).toHaveBeenCalled();
 	});
 
 	it("hides Ownership and Bylines for users below the editor role", async () => {
